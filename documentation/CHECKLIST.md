@@ -1,0 +1,91 @@
+# SokoBot — Living Implementation Checklist
+
+> **This is the canonical, living checklist** (the snapshot in `BLUEPRINT.md` §0.2 is just a copy).
+> **Update this file after every implementation change**: tick what's done, add items you
+> discover, and note anything you did *differently* from `BLUEPRINT.md`. Anyone should be able to
+> glance here and know what's done / in progress / left without reading the code.
+>
+> Full design and rationale: see **[`BLUEPRINT.md`](./BLUEPRINT.md)**. Section refs (§) point there.
+
+**Status legend:** `[ ]` not started · `[~]` in progress · `[x]` done · _(note: …)_ deviation.
+
+---
+
+## Must-not-break facts (read before touching anything)
+
+- [x] Coordinate convention respected: **`width = columns`, `height = rows`, arrays `[row][col]`**
+      (the signature's param order is misleading — see BLUEPRINT §0.4-A). → `Board`
+- [x] Move chars: `u`=row−1, `d`=row+1, `l`=col−1, `r`=col+1 (§0.4-B). → `Board.DR/DC/DCHAR`
+- [x] Self-timing implemented — 14s `System.nanoTime()` deadline; harness timer does not kill the thread (§0.4-C, §6).
+- [x] Grading pass/fail on a **complete** solve; we never return partial paths (§0.4-C, §6.2).
+- [x] **JDK standard library only** — no external jars (§0.4-D).
+- [x] `itemsData` crates-on-targets / player-on-target handled (initial state counted correctly) (§0.4-E).
+- [x] `original*` ~10-crate levels confirmed stretch/timeout, fail cleanly, not the 2–8 band (§0.4-F).
+
+## Milestones (map onto BLUEPRINT §7 classes)
+
+- [x] **M1 — IO adapter & board model** (§1, §0.4-A) → `Board` _(GameState folded into `Node` — see deviations)_
+- [x] **M2 — Static dead-square map** (§5.1) → `DeadlockDetector.computeDeadSquares`
+- [~] **M3 — Corridor/tunnel tagging** (§5.3) → **DEFERRED** (see deviations; static+freeze cover most)
+- [x] **M4 — State + Zobrist hashing** (§1) → `Board` keys + incremental XOR in `AStarSolver`
+- [x] **M5 — Push generator + reachability flood-fill** (§2) → `PathFinder.reachRegion`, `AStarSolver`
+- [x] **M6 — Dynamic group-deadlock check** (§5.2) → `DeadlockDetector.isFreezeDeadlock`
+- [x] **M7 — Heuristic (matching) + ∞ on deadlock** (§4, §5.4) → `Heuristic` (Hungarian + push-dist maps)
+- [x] **M8 — Transposition table + dead marker** (§3.3, §5.4) → `TranspositionTable` over `LongIntMap`
+- [x] **M9 — A\* loop (open PQ, closed, tie-break, goal test)** (§3) → `AStarSolver.solve`
+- [x] **M10 — Timer + node cap** (§6) → `AStarSolver` (14s deadline, NODE_CAP=3M; first-solution fallback)
+- [x] **M11 — Move-string reconstruction** (§2.4) → `AStarSolver.reconstruct` + `PathFinder.appendPath`
+- [x] **M12 — Wire into `SokoBot.solveSokobanPuzzle`; JDK-only; try/catch→`""`** (§6.3, §7)
+- [x] **M13 — Test harness** (§9): `solver/Harness.java` runs all `maps/`, simulates + verifies solutions
+
+## Per-milestone isolation test done?
+
+Verified end-to-end via `Harness` (simulate-and-verify) rather than per-class unit tests:
+- [x] M11 output re-simulates (GamePanel rules) to all-crates-on-targets for every solved level
+- [x] M9 solves `twoboxes*`, `threeboxes*`, `fourboxes*`, `fiveboxes*` in <0.1s each
+- [ ] (Optional) add JUnit-style isolation tests per class if the team wants finer coverage
+
+## Integration / acceptance (verified 2026-06-21)
+
+- [x] Compiles via clean `sokobot.bat` path (`del *.class` + `javac src/main/Driver.java -cp src`) — all 9 solver classes produced, exit 0.
+- [ ] `sokobot testlevel` solves and animates (GUI not run headlessly here; logic verified via Harness).
+- [x] T1 (1–2 crates) all pass — testlevel, twoboxes1/2/3.
+- [x] T2 (3–5 crates) all pass within 15s — threeboxes*, fourboxes*, fiveboxes*.
+- [x] T3 / stretch: original1 (6 crates) PASS 0.04s; original2 (10) & original3 (11) time out cleanly (return "", no crash) — both exceed the 2–8 grading band.
+- [x] Never hangs or throws to the harness (returns `""` on give-up / any exception).
+- [x] **Bundled-set result: 14/16 PASS (87.5%); 14/14 PASS on the 2–8 crate band.** Comfortably ≥80% target.
+      (Only failures: original2/10 crates, original3/11 crates — both above the band.) Run with `testall.bat`.
+- [x] Tuning recorded: `w`=1.5 (W_NUM/W_DEN=3/2), budget=14.0s, `NODE_CAP`=3,000,000.
+
+## Deviations from BLUEPRINT (keep this honest)
+
+- **GameState folded into `Node`** (§7 listed a separate `GameState`). Reason: per-node memory — millions of
+  nodes; avoiding a second object per node matters under the budget. `Node` carries crates/playerNorm/hash directly.
+- **Corridor deadlock (§5.3) not implemented.** Reason: soundness risk (a false-positive deadlock loses
+  solutions) and low marginal value — static dead squares + freeze already catch the common corridor traps.
+  If the hidden set reveals corridor-heavy failures, add a *conservative* check then. Counts as a known gap.
+- **Anytime improvement (§6.2 step 2–3) not implemented.** We return the FIRST complete solution found
+  (greedy-leaning weighted A*). Reason: passes grading; the improvement phase only shortens move counts.
+  Move counts are currently longer-than-optimal (e.g., original1 = 407 moves) — acceptable for pass/fail.
+
+## Open decisions log (resolved for the initial build — revisit on the hidden set)
+
+- [x] Heuristic weight `w`: **1.5** — solves the whole 2–8 band in <0.1s; raise toward 2.0 only if a hard level times out.
+- [x] Time budget slack: **14.0s** (1s under the 15s limit) — no late returns observed.
+- [x] `NODE_CAP`: **3,000,000** — time limit bites first on the hard levels; lower if a grader OOMs on a small heap.
+- [x] First-goal vs. anytime: **first-goal** (simplest; passes). Revisit only if move-count quality matters.
+- [x] Hungarian vs. greedy matching: **Hungarian** (exact, n≤~12, negligible cost).
+
+## Change log (newest first)
+
+- 2026-06-21 — Added `FINDINGS.md` (layman write-up of open checklist items + why 14/16 solve) and
+  `testall_gui.bat`/`testall_gui.sh` (opens the game window per map to watch the bot solve; the
+  existing `testall.bat`/`.sh` remain the fast headless PASS/FAIL runner). Removed two stale duplicate
+  lines from the open-decisions log.
+- 2026-06-21 — Initial full implementation of the push-based weighted-A\* solver per BLUEPRINT.
+  Classes: `LongIntMap`, `Board`, `Node`, `TranspositionTable`, `DeadlockDetector`, `Heuristic`,
+  `PathFinder`, `AStarSolver`, `SokoBot` (+ dev-only `Harness`). Verified: 14/16 bundled maps pass
+  (14/14 on the 2–8 crate band, all <0.1s); original2/3 (10–11 crates) time out cleanly. Added
+  `testall.bat`/`testall.sh` headless all-maps runner. Deviations:
+  GameState folded into Node, corridor deadlock (§5.3) deferred, first-solution (no anytime refine).
+- _YYYY-MM-DD — (name) — what changed / any deviation from BLUEPRINT._
