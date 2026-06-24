@@ -26,7 +26,8 @@
 
 - [x] **M1 — IO adapter & board model** (§1, §0.4-A) → `Board` _(GameState folded into `Node` — see deviations)_
 - [x] **M2 — Static dead-square map** (§5.1) → `DeadlockDetector.computeDeadSquares`
-- [~] **M3 — Corridor/tunnel tagging** (§5.3) → **DEFERRED** (see deviations; static+freeze cover most)
+- [x] **M3 — Tunnel macros** (§5.3) → `AStarSolver.tunnelPush` collapses a straight push-run through a
+      1-wide corridor into one search edge (move-generation form). Corridor *deadlock* tagging still deferred — see deviations.
 - [x] **M4 — State + Zobrist hashing** (§1) → `Board` keys + incremental XOR in `AStarSolver`
 - [x] **M5 — Push generator + reachability flood-fill** (§2) → `PathFinder.reachRegion`, `AStarSolver`
 - [x] **M6 — Dynamic group-deadlock check** (§5.2) → `DeadlockDetector.isFreezeDeadlock`
@@ -51,33 +52,51 @@ Verified end-to-end via `Harness` (simulate-and-verify) rather than per-class un
 - [ ] `sokobot testlevel` solves and animates (GUI not run headlessly here; logic verified via Harness).
 - [x] T1 (1–2 crates) all pass — testlevel, twoboxes1/2/3.
 - [x] T2 (3–5 crates) all pass within 15s — threeboxes*, fourboxes*, fiveboxes*.
-- [x] T3 / stretch: original1 (6 crates) PASS 0.04s; original2 (10) & original3 (11) time out cleanly (return "", no crash) — both exceed the 2–8 grading band.
+- [x] T3 / stretch: original1 (6 crates) PASS; original2 (10 crates) now PASS ~0.7s after tunnel macros;
+      original3 (11 crates) still times out cleanly (return "", no crash). Both originals exceed the 2–8 grading band.
 - [x] Never hangs or throws to the harness (returns `""` on give-up / any exception).
-- [x] **Bundled-set result: 14/16 PASS (87.5%); 14/14 PASS on the 2–8 crate band.** Comfortably ≥80% target.
-      (Only failures: original2/10 crates, original3/11 crates — both above the band.) Run with `testall.bat`.
-- [x] Tuning recorded: `w`=1.5 (W_NUM/W_DEN=3/2), budget=14.0s, `NODE_CAP`=3,000,000.
+- [x] **Bundled-set result: 15/16 PASS (93.8%); 14/14 PASS on the 2–8 crate band.** Comfortably ≥80% target.
+      (Only failure: original3/11 crates — above the band.) Run with `testall.bat`.
+- [x] Tuning recorded: `w`=1.5 (W_NUM/W_DEN=3/2), budget=14.0s, `NODE_CAP`=3,000,000, tunnel macros on.
 
 ## Deviations from BLUEPRINT (keep this honest)
 
 - **GameState folded into `Node`** (§7 listed a separate `GameState`). Reason: per-node memory — millions of
   nodes; avoiding a second object per node matters under the budget. `Node` carries crates/playerNorm/hash directly.
-- **Corridor deadlock (§5.3) not implemented.** Reason: soundness risk (a false-positive deadlock loses
-  solutions) and low marginal value — static dead squares + freeze already catch the common corridor traps.
-  If the hidden set reveals corridor-heavy failures, add a *conservative* check then. Counts as a known gap.
+- **Tunnel handling is a move-macro, not a deadlock check (§5.3).** `tunnelPush` collapses a straight
+  push-run through a 1-wide corridor into one edge. Sound: only interior tunnel cells are skipped; a crate
+  is never forced into a junction (where stopping can be necessary — the bug that briefly broke fourboxes1
+  before the "stop at the last tunnel cell" fix). This is what cracked original2. Corridor *deadlock*
+  detection proper is still not implemented (soundness risk for low marginal value; static dead squares +
+  freeze cover the common traps). Counts as a known gap.
 - **Anytime improvement (§6.2 step 2–3) not implemented.** We return the FIRST complete solution found
   (greedy-leaning weighted A*). Reason: passes grading; the improvement phase only shortens move counts.
-  Move counts are currently longer-than-optimal (e.g., original1 = 407 moves) — acceptable for pass/fail.
+  Move counts are longer-than-optimal (e.g., original1 = 437 moves) — acceptable for pass/fail.
 
 ## Open decisions log (resolved for the initial build — revisit on the hidden set)
 
-- [x] Heuristic weight `w`: **1.5** — solves the whole 2–8 band in <0.1s; raise toward 2.0 only if a hard level times out.
+- [x] Heuristic weight `w`: **1.5** — solves the whole 2–8 band in <0.1s. (Empirically, raising `w` up to
+      ~30 does NOT help the remaining hard level — see the original3 note below.)
 - [x] Time budget slack: **14.0s** (1s under the 15s limit) — no late returns observed.
 - [x] `NODE_CAP`: **3,000,000** — time limit bites first on the hard levels; lower if a grader OOMs on a small heap.
 - [x] First-goal vs. anytime: **first-goal** (simplest; passes). Revisit only if move-count quality matters.
 - [x] Hungarian vs. greedy matching: **Hungarian** (exact, n≤~12, negligible cost).
+- [x] **original3 (11 crates) left unsolved — diagnosed, not a tuning gap.** With a 120s budget + 100M-node
+      cap it still fails after exploring ~12M states, so it is *guidance/pruning*-bound, not throughput-bound:
+      the matching heuristic is blind to the goal-room packing order, and there is no corral/packing deadlock
+      check. Cracking it needs corral (PI-corral) pruning or a packing-aware heuristic — substantial work with
+      real regression risk — for a map above the graded band. Deliberately not pursued.
 
 ## Change log (newest first)
 
+- 2026-06-24 — Implemented **tunnel macros** (`AStarSolver.tunnelPush`/`isTunnel`; `Node.pushCount`):
+  a straight push-run through a 1-wide corridor collapses into one search edge, and reconstruction emits
+  the whole run. Sound — only interior tunnel cells are skipped; a crate is never forced into a junction
+  (the bug that briefly broke fourboxes1 before the "stop at the last tunnel cell" fix). Result:
+  **15/16 (was 14/16)** — original2 (10 crates) now solves in ~0.7s; all 14 graded-band maps still pass,
+  no regressions. Weight and transposition-table-size were swept empirically and found to be non-levers,
+  so both stay at baseline. original3 (11 crates) remains unsolved and is diagnosed as guidance-bound
+  (see open-decisions note), not throughput-bound.
 - 2026-06-21 — Added `FINDINGS.md` (layman write-up of open checklist items + why 14/16 solve) and
   `testall_gui.bat`/`testall_gui.sh` (opens the game window per map to watch the bot solve; the
   existing `testall.bat`/`.sh` remain the fast headless PASS/FAIL runner). Removed two stale duplicate

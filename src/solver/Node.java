@@ -6,9 +6,9 @@ package solver;
  * than living in a separate GameState object — see CHECKLIST.md for this deviation from the
  * blueprint's class list.
  *
- * The push that produced this node is recorded as (pushFrom, pushDir): the crate that moved was at
- * cell {@code pushFrom} and was pushed in direction {@code pushDir}; afterwards the player stands on
- * {@code pushFrom}. The root node uses pushDir = -1.
+ * The push that produced this node is recorded as (pushFrom, pushDir, pushCount): the crate that
+ * moved started at cell {@code pushFrom} and was pushed {@code pushCount} times in direction
+ * {@code pushDir} (pushCount > 1 is a tunnel macro). The root node uses pushDir = -1.
  */
 public class Node implements Comparable<Node> {
   final int[] crates;     // crate cell ids (unordered; Zobrist XOR is order-independent)
@@ -20,10 +20,11 @@ public class Node implements Comparable<Node> {
   final Node parent;
   final int pushFrom;     // crate cell before the push that created this node
   final int pushDir;      // direction of that push, or -1 for the root
+  final int pushCount;    // consecutive pushes in pushDir (tunnel macro); 1 for a plain push
   final int seq;          // insertion order, for deterministic tie-breaking
 
   Node(int[] crates, int playerNorm, long hash, int g, int h, int f,
-       Node parent, int pushFrom, int pushDir, int seq) {
+       Node parent, int pushFrom, int pushDir, int pushCount, int seq) {
     this.crates = crates;
     this.playerNorm = playerNorm;
     this.hash = hash;
@@ -33,6 +34,7 @@ public class Node implements Comparable<Node> {
     this.parent = parent;
     this.pushFrom = pushFrom;
     this.pushDir = pushDir;
+    this.pushCount = pushCount;
     this.seq = seq;
   }
 

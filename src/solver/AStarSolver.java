@@ -7,7 +7,8 @@ import java.util.PriorityQueue;
 /**
  * Push-based weighted A* search (Blueprint sections 2, 3, 6).
  *
- * Branches on pushes (move one crate one tile), normalizes the player to its reachable region,
+ * Branches on pushes — a crate moves one tile, or (via tunnel macros) a whole straight run through a
+ * 1-wide corridor collapses into a single edge. Normalizes the player to its reachable region,
  * dedups states through a Zobrist transposition table, prunes deadlocks via static dead squares +
  * freeze checks + an infinite heuristic, and self-enforces a wall-clock deadline. Returns the first
  * complete solution found (greedy-leaning, since grading is pass/fail on a complete solve), or ""
@@ -61,7 +62,7 @@ public class AStarSolver {
     PriorityQueue<Node> open = new PriorityQueue<>();
     int seq = 0;
     Node root = new Node(b.crateStart.clone(), playerNorm, rootHash,
-        0, rootH, fValue(0, rootH), null, -1, -1, seq++);
+        0, rootH, fValue(0, rootH), null, -1, -1, 0, seq++);
     open.add(root);
     table.put(rootHash, 0);
 
@@ -126,20 +127,25 @@ public class AStarSolver {
         int d = candDir[i];
         int destId = b.cellId(b.rowOf(cell) + Board.DR[d], b.colOf(cell) + Board.DC[d]);
 
-        // Simulate the push: crate cell -> destId, player ends on the old crate cell.
+        // Tunnel macro: collapse a straight run through a 1-wide corridor into one edge.
+        int endId = tunnelPush(destId, d);
+        int pushCount = Math.abs(b.rowOf(endId) - b.rowOf(cell))
+            + Math.abs(b.colOf(endId) - b.colOf(cell));
+
+        // Simulate the (macro) push: crate cell -> endId, player ends behind it in the tunnel.
         occ[cell] = false;
-        occ[destId] = true;
+        occ[endId] = true;
         int newNorm = pathFinder.reachRegion(cell, occ);
         long newHash = node.hash
-            ^ b.zCrate[cell] ^ b.zCrate[destId]
+            ^ b.zCrate[cell] ^ b.zCrate[endId]
             ^ b.zPlayer[node.playerNorm] ^ b.zPlayer[newNorm];
-        int gNew = node.g + 1;
+        int gNew = node.g + pushCount;
 
         boolean keep = false;
         if (!table.isDead(newHash)) {
           int seen = table.getBestG(newHash);
           if (seen == TranspositionTable.ABSENT || seen > gNew) {
-            if (deadlock.isFreezeDeadlock(occ, destId)) {
+            if (deadlock.isFreezeDeadlock(occ, endId)) {
               table.markDead(newHash);
             } else {
               keep = true;
@@ -149,12 +155,12 @@ public class AStarSolver {
 
         if (keep) {
           int[] newCrates = crates.clone();
-          newCrates[candIdx[i]] = destId;
+          newCrates[candIdx[i]] = endId;
           if (allOnTargets(newCrates)) {
             occ[cell] = true;
-            occ[destId] = false;
+            occ[endId] = false;
             Node goalNode = new Node(newCrates, newNorm, newHash,
-                gNew, 0, gNew, node, cell, d, seq++);
+                gNew, 0, gNew, node, cell, d, pushCount, seq++);
             return reconstruct(goalNode);
           }
           int hNew = heuristic.compute(newCrates);
@@ -163,13 +169,13 @@ public class AStarSolver {
           } else {
             table.put(newHash, gNew);
             open.add(new Node(newCrates, newNorm, newHash,
-                gNew, hNew, fValue(gNew, hNew), node, cell, d, seq++));
+                gNew, hNew, fValue(gNew, hNew), node, cell, d, pushCount, seq++));
           }
         }
 
-        // Revert the simulated push.
+        // Revert the simulated (macro) push.
         occ[cell] = true;
-        occ[destId] = false;
+        occ[endId] = false;
       }
 
       // Reset occupancy for the next node.
@@ -183,6 +189,59 @@ public class AStarSolver {
 
   private int fValue(int g, int h) {
     return g + (W_NUM * h) / W_DEN;
+  }
+
+  /**
+   * Tunnel macro (Blueprint section 5.3, conservative form). When a crate travels through a run of
+   * 1-wide tunnel cells (both perpendicular sides walled), the only useful continuation for that
+   * crate is to keep going the same way: the player ends up directly behind it after each push, so
+   * no repositioning is possible or needed. We advance the crate in direction {@code d} through
+   * consecutive tunnel cells, stopping at the LAST tunnel cell before a junction/room, at a target,
+   * or where the next cell is blocked (wall/crate) or a static dead square. This collapses the run
+   * into one search edge.
+   *
+   * Sound: only interior tunnel cells are skipped. Such a cell is not a goal, has no perpendicular
+   * exits, and shifting the crate one cell along a branch-free tunnel changes no junction access, so
+   * stopping there is never necessary. Crucially we do NOT push the crate on into a junction (a cell
+   * where it could turn or gate the player's access) -- that entry is left as an ordinary push,
+   * because stopping in a junction can be necessary. Targets are preserved as stops.
+   *
+   * @param destId the crate's cell after the first single push (already validated legal)
+   * @param d      push direction
+   * @return the crate's final cell after the macro (== destId when no extension applies)
+   */
+  private int tunnelPush(int destId, int d) {
+    int end = destId;
+    while (!b.target[end] && isTunnel(end, d)) {
+      int nr = b.rowOf(end) + Board.DR[d];
+      int nc = b.colOf(end) + Board.DC[d];
+      if (!b.inBounds(nr, nc)) {
+        break;
+      }
+      int next = b.cellId(nr, nc);
+      if (b.wall[next] || occ[next] || deadlock.dead[next]) {
+        break;
+      }
+      if (!isTunnel(next, d)) {
+        break;  // next is a junction/room: stop at the last tunnel cell, enter it as a normal push
+      }
+      end = next;
+    }
+    return end;
+  }
+
+  /** True if a crate at {@code cell} moving along {@code d} is walled on both perpendicular sides. */
+  private boolean isTunnel(int cell, int d) {
+    int r = b.rowOf(cell);
+    int c = b.colOf(cell);
+    if (d <= 1) {  // vertical push (up/down): perpendicular is the left/right pair
+      return wallAt(r, c - 1) && wallAt(r, c + 1);
+    }
+    return wallAt(r - 1, c) && wallAt(r + 1, c);  // horizontal push: check up/down
+  }
+
+  private boolean wallAt(int r, int c) {
+    return !b.inBounds(r, c) || b.wall[b.cellId(r, c)];
   }
 
   private boolean allOnTargets(int[] crates) {
@@ -228,13 +287,21 @@ public class AStarSolver {
     for (Node n : pushes) {
       int from = n.pushFrom;
       int d = n.pushDir;
-      int stand = b.cellId(b.rowOf(from) - Board.DR[d], b.colOf(from) - Board.DC[d]);
-      int dest = b.cellId(b.rowOf(from) + Board.DR[d], b.colOf(from) + Board.DC[d]);
+      int count = n.pushCount;
+      int dr = Board.DR[d];
+      int dc = Board.DC[d];
+      int fr = b.rowOf(from);
+      int fc = b.colOf(from);
+      // Walk the player behind the crate, then push `count` times straight through the tunnel.
+      int stand = b.cellId(fr - dr, fc - dc);
       pathFinder.appendPath(sb, player, stand, rocc);
-      sb.append(Board.DCHAR[d]);
+      for (int s = 0; s < count; s++) {
+        sb.append(Board.DCHAR[d]);
+      }
+      int dest = b.cellId(fr + dr * count, fc + dc * count);
       rocc[from] = false;
       rocc[dest] = true;
-      player = from;
+      player = b.cellId(fr + dr * (count - 1), fc + dc * (count - 1));
     }
     return sb.toString();
   }
