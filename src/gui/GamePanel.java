@@ -230,7 +230,6 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
     freePlay = false;
   }
 
-  // 0 - Up, 1 - down, 2 - left, 3 - right
   private void executeMove(int direction) {
     int ptRow = -1;
     int ptCol = -1;
@@ -401,7 +400,6 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
       }
     } else if (e.getSource() == checkForSolutionTimer) {
       if (!solutionThread.isAlive()) {
-        // Solution was found
         solutionTimer.stop();
         checkForSolutionTimer.stop();
         String solution = solutionThread.getSolution();
@@ -415,7 +413,6 @@ public class GamePanel extends JPanel implements KeyListener, ActionListener {
       this.solutionTimeString = String.format("%.2f", elapsedSolutionTime / 1000000000.0) + "s";
       this.repaint();
     } else if (e.getSource() == solutionTimer) {
-      // Solution was not found
       solutionTimer.stop();
       checkForSolutionTimer.stop();
       long elapsedSolutionTime = System.nanoTime() - solutionStartTime;

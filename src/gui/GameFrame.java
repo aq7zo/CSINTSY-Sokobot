@@ -7,11 +7,8 @@ import reader.MapData;
 
 public class GameFrame extends JFrame {
   private GamePanel mainPanel;
-  private MapData mapData;
 
   public GameFrame(MapData mapData) {
-    this.mapData = mapData;
-
     this.setSize(800, 600);
     this.setLayout(new GridLayout(0, 1));
     this.setLocationRelativeTo(null);

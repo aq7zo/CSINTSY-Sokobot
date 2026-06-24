@@ -1,14 +1,5 @@
 package solver;
 
-/**
- * Open-addressing long->int hash map with linear probing.
- *
- * Purpose-built for the transposition table (Blueprint section 3): keys are 64-bit Zobrist hashes,
- * values are best-known g(n) or a "dead" marker. Avoids the boxing overhead of
- * HashMap&lt;Long,Integer&gt;, which matters when we store millions of visited states under the 15s
- * budget. Absent lookups return a caller-supplied default so the table can distinguish "never seen"
- * from any real stored value.
- */
 public class LongIntMap {
   private long[] keys;
   private int[] values;
@@ -33,7 +24,6 @@ public class LongIntMap {
     return size;
   }
 
-  /** 64-bit finalizer mix (Murmur3 style) so Zobrist keys spread across the table. */
   private static int mix(long k) {
     k ^= (k >>> 33);
     k *= 0xff51afd7ed558ccdL;

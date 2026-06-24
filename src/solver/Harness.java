@@ -5,17 +5,6 @@ import java.util.Arrays;
 import reader.FileReader;
 import reader.MapData;
 
-/**
- * Dev-only headless test harness (NOT part of the graded path). Runs SokoBot on map files, then
- * simulates the returned move string with the same rules as GamePanel to verify it really solves
- * the level, and prints PASS/FAIL with timing and length.
- *
- * Not compiled by sokobot.bat (which only builds Driver + its dependencies). Build and run with:
- *   javac -cp src src/solver/*.java src/reader/*.java
- *   java  -cp src solver.Harness            (runs every maps/*.txt)
- *   java  -cp src solver.Harness twoboxes1  (runs specific levels)
- * Run from the sokobot/ directory so the relative "maps/" path resolves.
- */
 public class Harness {
 
   public static void main(String[] args) {
@@ -67,8 +56,8 @@ public class Harness {
           case '.': m = '.'; break;
           case '@': it = '@'; break;
           case '$': it = '$'; crateCount++; break;
-          case '+': m = '.'; it = '@'; break;       // player on target
-          case '*': m = '.'; it = '$'; crateCount++; break;  // crate on target
+          case '+': m = '.'; it = '@'; break;
+          case '*': m = '.'; it = '$'; crateCount++; break;
           default: break;
         }
         map[i][j] = m;
@@ -89,7 +78,6 @@ public class Harness {
     return r;
   }
 
-  /** Replays the solution with GamePanel's movement rules; returns true if all crates end on goals. */
   private static boolean simulate(char[][] map, char[][] items, String sol) {
     int rows = map.length;
     int cols = map[0].length;
@@ -117,7 +105,7 @@ public class Harness {
       int ntr = pr + dr;
       int ntc = pc + dc;
       if (ntr < 0 || ntr >= rows || ntc < 0 || ntc >= cols || map[ntr][ntc] == '#') {
-        continue;  // illegal move: blocked by wall/edge (matches handleMovement ignoring it)
+        continue;
       }
       if (it[ntr][ntc] == '$') {
         int btr = ntr + dr;
@@ -138,7 +126,7 @@ public class Harness {
     for (int i = 0; i < rows; i++) {
       for (int j = 0; j < cols; j++) {
         if (it[i][j] == '$' && map[i][j] != '.') {
-          return false;  // a crate not on a target
+          return false;
         }
       }
     }
